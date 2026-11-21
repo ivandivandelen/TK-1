@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Klasik Arena FPS - Prototip</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; touch-action: none; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #12151c; font-family: Arial, sans-serif; color: #fff; }
+    #gameCanvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+    #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+    #topBar {
+      position: absolute; top: 12px; left: 12px; right: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+      background: rgba(15, 20, 30, 0.72); border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 10px; padding: 8px 14px; font-size: 14px;
+    }
+    #crosshair {
+      position: fixed; top: 50%; left: 50%; width: 22px; height: 22px;
+      transform: translate(-50%, -50%); pointer-events: none; z-index: 12;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ""; position: absolute; background: rgba(255, 255, 255, 0.9);
+    }
+    #crosshair::before { width: 2px; height: 22px; left: 10px; top: 0; }
+    #crosshair::after { width: 22px; height: 2px; top: 10px; left: 0; }
+    #hitMarker {
+      position: fixed; top: 50%; left: 50%; width: 28px; height: 28px;
+      transform: translate(-50%, -50%) rotate(45deg);
+      border: 2px solid #ff4655; border-radius: 4px;
+      opacity: 0; transition: opacity 0.12s ease; pointer-events: none; z-index: 13;
+    }
+    #scopeOverlay {
+      position: fixed; inset: 0; display: none; pointer-events: none; z-index: 9;
+      background: radial-gradient(circle, transparent 22%, rgba(0, 0, 0, 0.92) 24%);
+      border: 2px solid rgba(255,255,255,0.25);
+    }
+
+    #weaponBar {
+      position: fixed; bottom: 165px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 6px; flex-wrap: wrap; justify-content: center;
+      pointer-events: auto; z-index: 15; max-width: 96vw;
+    }
+    .wBtn {
+      background: rgba(20, 26, 38, 0.85); color: #dce3f0;
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 8px;
+      padding: 6px 10px; font-size: 12px; cursor: pointer;
+    }
+    .wBtn.active { background: #ff4655; color: #fff; border-color: #ff4655; font-weight: bold; }
+
+    #joyZone {
+      position: fixed; left: 22px; bottom: 22px; width: 126px; height: 126px;
+      border-radius: 50%; background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.22); pointer-events: auto; z-index: 15;
+    }
+    #joyKnob {
+      position: absolute; left: 38px; top: 38px; width: 50px; height: 50px;
+      border-radius: 50%; background: rgba(255, 255, 255, 0.45);
+    }
+
+    #actionBtns {
+      position: fixed; right: 20px; bottom: 22px;
+      display: grid; grid-template-columns: repeat(2, 68px); gap: 10px;
+      pointer-events: auto; z-index: 15;
+    }
+    .actBtn {
+      height: 54px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(24, 32, 46, 0.88); color: #fff; font-weight: bold; font-size: 12px;
+    }
+    #fireBtn { background: rgba(220, 50, 65, 0.92); height: 68px; font-size: 14px; }
+    #reloadBtn { background: rgba(45, 115, 200, 0.9); height: 68px; }
+    #statusToast {
+      position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.75); padding: 6px 14px; border-radius: 20px;
+      font-size: 13px; z-index: 20; pointer-events: none;
+    }
+  </style>
+  <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="scopeOverlay"></div>
+  <div id="crosshair"></div>
+  <div id="hitMarker"></div>
+  <div id="statusToast">Hazır — Hedefleri vur!</div>
+
+  <div id="hud">
+    <div id="topBar">
+      <span id="weaponInfo">Silah: Kobra-47</span>
+      <span id="ammoInfo">Mermi: 30 / 120</span>
+      <span id="scoreInfo">Skor: 0</span>
+    </div>
+  </div>
+
+  <div id="weaponBar"></div>
+
+  <div id="joyZone"><div id="joyKnob"></div></div>
+
+  <div id="actionBtns">
+    <button class="actBtn" id="scopeBtn">DÜRBÜN</button>
+    <button class="actBtn" id="jumpBtn">ZIPLA</button>
+    <button class="actBtn" id="fireBtn">ATEŞ</button>
+    <button class="actBtn" id="reloadBtn">ŞARJÖR</button>
+  </div>
+
+  <script>
+    const WEAPONS = [
+      { id: "kobra47", name: "Kobra-47", mag: 30, reserve: 120, fireRate: 135, damage: 36, spread: 0.004, zoom: 75, pitch: 115, noise: 0.25 },
+      { id: "hayaletp", name: "Hayalet-P", mag: 30, reserve: 150, fireRate: 115, damage: 31, spread: 0.002, zoom: 75, pitch: 155, noise: 0.12 },
+      { id: "balyoz", name: "Balyoz", mag: 10, reserve: 40, fireRate: 950, damage: 115, spread: 0.0005, zoom: 28, pitch: 72, noise: 0.35 },
+      { id: "gecekurdu", name: "Gece Kurdu", mag: 25, reserve: 125, fireRate: 100, damage: 24, spread: 0.003, zoom: 75, pitch: 185, noise: 0.10 },
+      { id: "colkartali", name: "Çöl Kartalı", mag: 7, reserve: 49, fireRate: 260, damage: 58, spread: 0.003, zoom: 75, pitch: 90, noise: 0.30 }
+    ];
+
+    let currentWeaponIdx = 0;
+    let ammoInMag = WEAPONS[0].mag;
+    let ammoReserve = WEAPONS[0].reserve;
+    let isScoped = false;
+    let lastShotTime = 0;
+    let score = 0;
+    let isFiring = false;
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playPunchyShot(pitchHz, noiseAmount) {
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const now = audioCtx.currentTime;
+
+      const osc = audioCtx.createOscillator();
+      const oscGain = audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(pitchHz * 1.4, now);
+      osc.frequency.exponentialRampToValueAtTime(38, now + 0.14);
+      oscGain.gain.setValueAtTime(0.45, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(oscGain).connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.15);
+
+      const bufferSize = Math.floor(audioCtx.sampleRate * 0.12);
+      const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
+
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(2400, now);
+      const nGain = audioCtx.createGain();
+      nGain.gain.setValueAtTime(noiseAmount, now);
+      nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+      noise.connect(filter).connect(nGain).connect(audioCtx.destination);
+      noise.start(now);
+    }
+
+    function playHitMarker() {
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(1650, now);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now); osc.stop(now + 0.07);
+    }
+
+    function speakTurkish(text) {
+      document.getElementById("statusToast").textContent = text;
+      if ("speechSynthesis" in window) {
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = "tr-TR";
+        utter.rate = 1.05;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utter);
+      }
+    }
+
+    const canvas = document.getElementById("gameCanvas");
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1b2230);
+    scene.fog = new THREE.Fog(0x1b2230, 18, 65);
+
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 120);
+    camera.position.set(0, 1.7, 14);
+    camera.rotation.order = "YXZ";
+    scene.add(camera);
+
+    const gunGroup = new THREE.Group();
+    const gunMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.16, 0.65),
+      new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.4 })
+    );
+    gunMesh.position.set(0.28, -0.24, -0.52);
+    gunGroup.add(gunMesh);
+    camera.add(gunGroup);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x384152, 1.1));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    dirLight.position.set(12, 22, 10);
+    scene.add(dirLight);
+
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(60, 60),
+      new THREE.MeshStandardMaterial({ color: 0x3b4252, roughness: 0.85 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+
+    const colliders = [];
+    function addBox(x, y, z, w, h, d, color) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color })
+      );
+      m.position.set(x, y, z);
+      scene.add(m);
+      colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
+    }
+
+    addBox(0, 2, -26, 48, 4, 1.5, 0x4c566a);
+    addBox(0, 2, 26, 48, 4, 1.5, 0x4c566a);
+    addBox(-24, 2, 0, 1.5, 4, 52, 0x4c566a);
+    addBox(24, 2, 0, 1.5, 4, 52, 0x4c566a);
+    addBox(-7, 1.1, 2, 3.2, 2.2, 3.2, 0xb48ead);
+    addBox(7, 1.1, -4, 3.2, 2.2, 3.2, 0x88c0d0);
+    addBox(0, 1.2, -11, 5.5, 2.4, 2.0, 0xd08770);
+
+    const targets = [];
+    const targetGeo = new THREE.BoxGeometry(1.1, 1.8, 1.1);
+    function spawnTarget() {
+      const mat = new THREE.MeshStandardMaterial({ color: 0xebcb8b });
+      const mesh = new THREE.Mesh(targetGeo, mat);
+      mesh.position.set((Math.random() - 0.5) * 26, 0.9, -4 - Math.random() * 14);
+      mesh.userData = { hp: 100 };
+      scene.add(mesh);
+      targets.push(mesh);
+    }
+    for (let i = 0; i < 4; i++) spawnTarget();
+
+    const weaponBar = document.getElementById("weaponBar");
+    function updateHUD() {
+      const w = WEAPONS[currentWeaponIdx];
+      document.getElementById("weaponInfo").textContent = "Silah: " + w.name;
+      document.getElementById("ammoInfo").textContent = `Mermi: ${ammoInMag} / ${ammoReserve}`;
+      document.getElementById("scoreInfo").textContent = "Skor: " + score;
+      [...weaponBar.children].forEach((btn, idx) => btn.classList.toggle("active", idx === currentWeaponIdx));
+    }
+
+    function equipWeapon(idx) {
+      currentWeaponIdx = idx;
+      const w = WEAPONS[idx];
+      ammoInMag = w.mag;
+      ammoReserve = w.reserve;
+      isScoped = false;
+      document.getElementById("scopeOverlay").style.display = "none";
+      camera.fov = 75;
+      camera.updateProjectionMatrix();
+      updateHUD();
+      speakTurkish(w.name + " alındı");
+    }
+
+    WEAPONS.forEach((w, i) => {
+      const b = document.createElement("button");
+      b.className = "wBtn" + (i === 0 ? " active" : "");
+      b.textContent = w.name;
+      b.onclick = () => equipWeapon(i);
+      weaponBar.appendChild(b);
+    });
+    updateHUD();
+
+    let joyX = 0, joyY = 0, joyTouchId = null;
+    const joyZone = document.getElementById("joyZone");
+    const joyKnob = document.getElementById("joyKnob");
+
+    joyZone.addEventListener("touchstart", (e) => {
+      const t = e.changedTouches[0];
+      joyTouchId = t.identifier;
+    });
+    joyZone.addEventListener("touchmove", (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyTouchId) {
+          const rect = joyZone.getBoundingClientRect();
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          let dx = (t.clientX - cx) / 42;
+          let dy = (t.clientY - cy) / 42;
+          const len = Math.hypot(dx, dy);
+          if (len > 1) { dx /= len; dy /= len; }
+          joyX = dx; joyY = dy;
+          joyKnob.style.transform = `translate(${dx * 34}px, ${dy * 34}px)`;
+        }
+      }
+    });
+    const resetJoy = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === joyTouchId) {
+          joyTouchId = null; joyX = 0; joyY = 0;
+          joyKnob.style.transform = "translate(0px, 0px)";
+        }
+      }
+    };
+    joyZone.addEventListener("touchend", resetJoy);
+    joyZone.addEventListener("touchcancel", resetJoy);
+
+    let lookTouchId = null, prevX = 0, prevY = 0;
+    canvas.addEventListener("touchstart", (e) => {
+      for (const t of e.changedTouches) {
+        if (t.clientX > window.innerWidth * 0.35 && lookTouchId === null) {
+          lookTouchId = t.identifier;
+          prevX = t.clientX; prevY = t.clientY;
+        }
+      }
+    });
+    canvas.addEventListener("touchmove", (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === lookTouchId) {
+          const sens = isScoped ? 0.0022 : 0.0045;
+          camera.rotation.y -= (t.clientX - prevX) * sens;
+          camera.rotation.x -= (t.clientY - prevY) * sens;
+          camera.rotation.x = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, camera.rotation.x));
+          prevX = t.clientX; prevY = t.clientY;
+        }
+      }
+    });
+    const endLook = (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier === lookTouchId) lookTouchId = null;
+      }
+    };
+    canvas.addEventListener("touchend", endLook);
+    canvas.addEventListener("touchcancel", endLook);
+
+    document.getElementById("scopeBtn").onclick = () => {
+      const w = WEAPONS[currentWeaponIdx];
+      isScoped = !isScoped;
+      camera.fov = isScoped ? w.zoom : 75;
+      camera.updateProjectionMatrix();
+      document.getElementById("scopeOverlay").style.display = isScoped ? "block" : "none";
+      gunGroup.visible = !isScoped;
+    };
+
+    let velY = 0, isGrounded = true;
+    document.getElementById("jumpBtn").onclick = () => {
+      if (isGrounded) { velY = 7.2; isGrounded = false; }
+    };
+
+    const fireBtn = document.getElementById("fireBtn");
+    fireBtn.addEventListener("touchstart", (e) => { e.preventDefault(); isFiring = true; });
+    fireBtn.addEventListener("touchend", () => { isFiring = false; });
+    fireBtn.addEventListener("touchcancel", () => { isFiring = false; });
+
+    function reloadWeapon() {
+      const w = WEAPONS[currentWeaponIdx];
+      if (ammoInMag === w.mag || ammoReserve <= 0) return;
+      const need = w.mag - ammoInMag;
+      const take = Math.min(need, ammoReserve);
+      ammoInMag += take;
+      ammoReserve -= take;
+      updateHUD();
+      speakTurkish("Şarjör değişti");
+    }
+    document.getElementById("reloadBtn").onclick = reloadWeapon;
+
+    const raycaster = new THREE.Raycaster();
+    function shoot() {
+      const w = WEAPONS[currentWeaponIdx];
+      const now = performance.now();
+      if (now - lastShotTime < w.fireRate) return;
+      if (ammoInMag <= 0) {
+        speakTurkish("Mermi bitti");
+        return;
+      }
+      lastShotTime = now;
+      ammoInMag--;
+      updateHUD();
+      playPunchyShot(w.pitch, w.noise);
+
+      gunMesh.position.z = -0.42;
+      setTimeout(() => { gunMesh.position.z = -0.52; }, 65);
+
+      const aimX = (Math.random() - 0.5) * w.spread;
+      const aimY = (Math.random() - 0.5) * w.spread;
+      raycaster.setFromCamera(new THREE.Vector2(aimX, aimY), camera);
+
+      const hits = raycaster.intersectObjects(targets, false);
+      if (hits.length > 0) {
+        const hitObj = hits[0].object;
+        hitObj.userData.hp -= w.damage;
+        playHitMarker();
+        const hm = document.getElementById("hitMarker");
+        hm.style.opacity = "1";
+        setTimeout(() => { hm.style.opacity = "0"; }, 110);
+
+        if (hitObj.userData.hp <= 0) {
+          score += 100;
+          updateHUD();
+          speakTurkish("Hedef temizlendi");
+          scene.remove(hitObj);
+          targets.splice(targets.indexOf(hitObj), 1);
+          setTimeout(spawnTarget, 900);
+        }
+      }
+    }
+
+    let prevTime = performance.now();
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min((performance.now() - prevTime) / 1000, 0.05);
+      prevTime = performance.now();
+
+      if (isFiring) shoot();
+
+      const speed = 7.5;
+      const forward = new THREE.Vector3(-Math.sin(camera.rotation.y), 0, -Math.cos(camera.rotation.y));
+      const right = new THREE.Vector3(Math.cos(camera.rotation.y), 0, -Math.sin(camera.rotation.y));
+
+      const nextX = camera.position.x + (forward.x * -joyY + right.x * joyX) * speed * dt;
+      const nextZ = camera.position.z + (forward.z * -joyY + right.z * joyX) * speed * dt;
+
+      const radius = 0.65;
+      const blockedX = colliders.some(c => nextX + radius > c.minX && nextX - radius < c.maxX && camera.position.z + radius > c.minZ && camera.position.z - radius < c.maxZ);
+      const blockedZ = colliders.some(c => camera.position.x + radius > c.minX && camera.position.x - radius < c.maxX && nextZ + radius > c.minZ && nextZ - radius < c.maxZ);
+
+      if (!blockedX) camera.position.x = nextX;
+      if (!blockedZ) camera.position.z = nextZ;
+
+      velY -= 19.6 * dt;
+      camera.position.y += velY * dt;
+      if (camera.position.y <= 1.7) {
+        camera.position.y = 1.7;
+        velY = 0;
+        isGrounded = true;
+      }
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
